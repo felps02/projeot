@@ -1,0 +1,713 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Psicossocial API",
+    "description": "API para plataforma de avaliacao psicossocial de trabalhadores do comercio. Permite micro-avaliacoes diarias de saude mental, dashboards de lideranca, alertas automaticos e relatorios.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Suporte Psicossocial"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api/v1",
+      "description": "Servidor local"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": { "type": "object" },
+          "message": { "type": "string" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "data": { "type": "object", "nullable": true, "example": null },
+          "message": { "type": "string" }
+        }
+      },
+      "Usuario": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "nome": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "cargo": { "type": "string", "nullable": true },
+          "perfil": { "type": "string", "enum": ["administrador", "lider", "funcionario"] },
+          "setor": { "type": "string", "nullable": true },
+          "lider_id": { "type": "integer", "nullable": true },
+          "status": { "type": "string", "enum": ["ativo", "inativo"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "senha"],
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "joao@empresa.com" },
+          "senha": { "type": "string", "minLength": 6, "example": "senha123" }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["nome", "email", "senha"],
+        "properties": {
+          "nome": { "type": "string", "example": "Joao Silva" },
+          "email": { "type": "string", "format": "email", "example": "joao@empresa.com" },
+          "senha": { "type": "string", "minLength": 6, "example": "senha123" },
+          "cargo": { "type": "string", "example": "Vendedor" },
+          "perfil": { "type": "string", "enum": ["administrador", "lider", "funcionario"], "default": "funcionario" },
+          "setor": { "type": "string", "example": "Vendas" },
+          "lider_id": { "type": "integer", "nullable": true, "example": 1 }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" },
+          "usuario": { "$ref": "#/components/schemas/Usuario" }
+        }
+      },
+      "Pergunta": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "texto": { "type": "string" },
+          "categoria": { "type": "string", "enum": ["estresse", "burnout", "ansiedade", "sobrecarga", "motivacao", "assedio", "exaustao", "ambiente"] },
+          "tipo": { "type": "string", "enum": ["likert", "emoji", "selecao"] },
+          "ativa": { "type": "boolean" },
+          "ordem": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PerguntaRequest": {
+        "type": "object",
+        "required": ["texto", "categoria"],
+        "properties": {
+          "texto": { "type": "string", "example": "Como voce se sente hoje?" },
+          "categoria": { "type": "string", "enum": ["estresse", "burnout", "ansiedade", "sobrecarga", "motivacao", "assedio", "exaustao", "ambiente"] },
+          "tipo": { "type": "string", "enum": ["likert", "emoji", "selecao"], "default": "likert" },
+          "ativa": { "type": "boolean", "default": true },
+          "ordem": { "type": "integer", "example": 1 }
+        }
+      },
+      "Avaliacao": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "usuario_id": { "type": "integer" },
+          "data": { "type": "string", "format": "date" },
+          "score_risco": { "type": "number", "format": "float" },
+          "nivel_risco": { "type": "string", "enum": ["baixo", "moderado", "alto", "critico"] },
+          "completada": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AvaliacaoRequest": {
+        "type": "object",
+        "required": ["respostas"],
+        "properties": {
+          "respostas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["pergunta_id", "valor"],
+              "properties": {
+                "pergunta_id": { "type": "integer", "example": 1 },
+                "valor": { "type": "integer", "minimum": 1, "maximum": 5, "example": 3 }
+              }
+            }
+          }
+        }
+      },
+      "Resposta": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "avaliacao_id": { "type": "integer" },
+          "pergunta_id": { "type": "integer" },
+          "valor": { "type": "integer" },
+          "pergunta_texto": { "type": "string" },
+          "categoria": { "type": "string" },
+          "tipo": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Alerta": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "usuario_id": { "type": "integer" },
+          "tipo": { "type": "string", "enum": ["risco_alto", "padrao_emocional", "sem_checkin", "emergencia"] },
+          "nivel": { "type": "string", "enum": ["baixo", "moderado", "alto", "critico"] },
+          "descricao": { "type": "string" },
+          "lido": { "type": "boolean" },
+          "data": { "type": "string", "format": "date-time" },
+          "usuario_nome": { "type": "string" }
+        }
+      },
+      "Emergencia": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "usuario_id": { "type": "integer" },
+          "motivo": { "type": "string" },
+          "descricao": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["aberta", "em_atendimento", "resolvida"] },
+          "prioridade": { "type": "string", "enum": ["alta", "critica"] },
+          "data": { "type": "string", "format": "date-time" },
+          "usuario_nome": { "type": "string" }
+        }
+      },
+      "EmergenciaRequest": {
+        "type": "object",
+        "required": ["motivo"],
+        "properties": {
+          "motivo": { "type": "string", "maxLength": 255, "example": "Crise de ansiedade" },
+          "descricao": { "type": "string", "example": "Descricao detalhada da situacao" },
+          "prioridade": { "type": "string", "enum": ["alta", "critica"], "default": "critica" }
+        }
+      },
+      "DashboardResumo": {
+        "type": "object",
+        "properties": {
+          "total_funcionarios": { "type": "integer" },
+          "participacao_hoje": {
+            "type": "object",
+            "properties": {
+              "participantes": { "type": "integer" },
+              "total": { "type": "integer" },
+              "taxa": { "type": "integer" }
+            }
+          },
+          "distribuicao_risco": {
+            "type": "object",
+            "properties": {
+              "baixo": { "type": "integer" },
+              "moderado": { "type": "integer" },
+              "alto": { "type": "integer" },
+              "critico": { "type": "integer" }
+            }
+          },
+          "alertas_ativos": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "integer" },
+              "por_nivel": { "type": "object" }
+            }
+          }
+        }
+      },
+      "Paginacao": {
+        "type": "object",
+        "properties": {
+          "pagina": { "type": "integer" },
+          "limite": { "type": "integer" },
+          "total": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": ["Autenticacao"],
+        "summary": "Login do usuario",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login realizado com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessResponse" },
+                    { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthResponse" } } }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "description": "Credenciais invalidas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Autenticacao"],
+        "summary": "Registro de novo usuario",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registro realizado com sucesso",
+            "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthResponse" } } } ] } } }
+          },
+          "409": { "description": "Email ja cadastrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Autenticacao"],
+        "summary": "Dados do usuario autenticado",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Dados do usuario", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Usuario" } } } ] } } } },
+          "401": { "description": "Nao autenticado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/usuarios": {
+      "get": {
+        "tags": ["Usuarios"],
+        "summary": "Listar usuarios",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["ativo", "inativo"] } },
+          { "name": "perfil", "in": "query", "schema": { "type": "string", "enum": ["administrador", "lider", "funcionario"] } },
+          { "name": "setor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Lista de usuarios", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "403": { "description": "Acesso negado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/usuarios/{id}": {
+      "get": {
+        "tags": ["Usuarios"],
+        "summary": "Obter usuario por ID",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Dados do usuario", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Usuario" } } } ] } } } },
+          "404": { "description": "Usuario nao encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "put": {
+        "tags": ["Usuarios"],
+        "summary": "Atualizar usuario",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "nome": { "type": "string" }, "email": { "type": "string" }, "cargo": { "type": "string" }, "setor": { "type": "string" }, "perfil": { "type": "string" }, "status": { "type": "string" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Usuario atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Usuario nao encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Usuarios"],
+        "summary": "Desativar usuario (soft delete)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Usuario desativado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Usuario nao encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/usuarios/{id}/subordinados": {
+      "get": {
+        "tags": ["Usuarios"],
+        "summary": "Listar subordinados de um lider",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Lista de subordinados", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/avaliacoes": {
+      "post": {
+        "tags": ["Avaliacoes"],
+        "summary": "Criar avaliacao diaria",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AvaliacaoRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "Avaliacao criada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "409": { "description": "Avaliacao de hoje ja realizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "get": {
+        "tags": ["Avaliacoes"],
+        "summary": "Listar avaliacoes",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Lista de avaliacoes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/avaliacoes/hoje": {
+      "get": {
+        "tags": ["Avaliacoes"],
+        "summary": "Verificar se a avaliacao de hoje foi realizada",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Status da avaliacao de hoje", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "realizada": { "type": "boolean" }, "avaliacao": { "$ref": "#/components/schemas/Avaliacao" } } } } } ] } } } }
+        }
+      }
+    },
+    "/avaliacoes/historico": {
+      "get": {
+        "tags": ["Avaliacoes"],
+        "summary": "Historico de avaliacoes com paginacao",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "usuario_id", "in": "query", "schema": { "type": "integer" }, "description": "ID do usuario (lider/admin)" }
+        ],
+        "responses": {
+          "200": { "description": "Historico de avaliacoes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/avaliacoes/{id}": {
+      "get": {
+        "tags": ["Avaliacoes"],
+        "summary": "Obter avaliacao com respostas",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Detalhes da avaliacao", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Avaliacao nao encontrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/perguntas": {
+      "get": {
+        "tags": ["Perguntas"],
+        "summary": "Listar todas as perguntas",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Lista de perguntas", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Pergunta" } } } } ] } } } }
+        }
+      },
+      "post": {
+        "tags": ["Perguntas"],
+        "summary": "Criar pergunta (admin)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PerguntaRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "Pergunta criada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "403": { "description": "Acesso negado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/perguntas/ativas": {
+      "get": {
+        "tags": ["Perguntas"],
+        "summary": "Listar perguntas ativas",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Perguntas ativas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/perguntas/{id}": {
+      "get": {
+        "tags": ["Perguntas"],
+        "summary": "Obter pergunta por ID",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Detalhes da pergunta", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Pergunta nao encontrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "put": {
+        "tags": ["Perguntas"],
+        "summary": "Atualizar pergunta (admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PerguntaRequest" } } } },
+        "responses": {
+          "200": { "description": "Pergunta atualizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Pergunta nao encontrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Perguntas"],
+        "summary": "Remover pergunta (admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Pergunta removida", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Pergunta nao encontrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/emergencias": {
+      "post": {
+        "tags": ["Emergencias"],
+        "summary": "Registrar emergencia",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmergenciaRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "Emergencia registrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      },
+      "get": {
+        "tags": ["Emergencias"],
+        "summary": "Listar emergencias (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["aberta", "em_atendimento", "resolvida"] } },
+          { "name": "prioridade", "in": "query", "schema": { "type": "string", "enum": ["alta", "critica"] } }
+        ],
+        "responses": {
+          "200": { "description": "Lista de emergencias", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/emergencias/abertas": {
+      "get": {
+        "tags": ["Emergencias"],
+        "summary": "Listar emergencias abertas (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Emergencias abertas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/emergencias/{id}/status": {
+      "put": {
+        "tags": ["Emergencias"],
+        "summary": "Atualizar status da emergencia (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["aberta", "em_atendimento", "resolvida"] } } } } }
+        },
+        "responses": {
+          "200": { "description": "Status atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Emergencia nao encontrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/alertas": {
+      "get": {
+        "tags": ["Alertas"],
+        "summary": "Listar alertas do usuario",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "tipo", "in": "query", "schema": { "type": "string", "enum": ["risco_alto", "padrao_emocional", "sem_checkin", "emergencia"] } },
+          { "name": "lido", "in": "query", "schema": { "type": "string", "enum": ["true", "false"] } }
+        ],
+        "responses": {
+          "200": { "description": "Lista de alertas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/alertas/nao-lidos": {
+      "get": {
+        "tags": ["Alertas"],
+        "summary": "Contar alertas nao lidos",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Contagem de alertas nao lidos", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "nao_lidos": { "type": "integer" } } } } } ] } } } }
+        }
+      }
+    },
+    "/alertas/{id}/lido": {
+      "put": {
+        "tags": ["Alertas"],
+        "summary": "Marcar alerta como lido",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Alerta marcado como lido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Alerta nao encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/dashboard/resumo": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "Resumo geral do dashboard (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Resumo do dashboard", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/SuccessResponse" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/DashboardResumo" } } } ] } } } }
+        }
+      }
+    },
+    "/dashboard/tendencias": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "Tendencias ao longo do tempo (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "dias", "in": "query", "schema": { "type": "integer", "default": 30 }, "description": "Numero de dias para analise" }
+        ],
+        "responses": {
+          "200": { "description": "Dados de tendencias", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/dashboard/heatmap": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "Dados para heatmap por setor/equipe (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "dias", "in": "query", "schema": { "type": "integer", "default": 30 } }
+        ],
+        "responses": {
+          "200": { "description": "Dados do heatmap", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/dashboard/kpis": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "KPIs principais (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "KPIs", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/relatorios/individual/{userId}": {
+      "get": {
+        "tags": ["Relatorios"],
+        "summary": "Relatorio individual de um funcionario (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Relatorio individual", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "404": { "description": "Usuario nao encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/relatorios/equipe/{liderId}": {
+      "get": {
+        "tags": ["Relatorios"],
+        "summary": "Relatorio da equipe de um lider (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "liderId", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Relatorio da equipe", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/relatorios/setor/{setor}": {
+      "get": {
+        "tags": ["Relatorios"],
+        "summary": "Relatorio por setor (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "setor", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Relatorio do setor", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
+    },
+    "/relatorios/exportar/pdf": {
+      "get": {
+        "tags": ["Relatorios"],
+        "summary": "Exportar relatorio em PDF (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "tipo", "in": "query", "required": true, "schema": { "type": "string", "enum": ["individual", "equipe", "setor"] } },
+          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "ID do usuario ou lider" },
+          { "name": "setor", "in": "query", "schema": { "type": "string" }, "description": "Nome do setor (para tipo=setor)" },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Arquivo PDF", "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "Tipo invalido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/relatorios/exportar/excel": {
+      "get": {
+        "tags": ["Relatorios"],
+        "summary": "Exportar relatorio em Excel (lider/admin)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "tipo", "in": "query", "required": true, "schema": { "type": "string", "enum": ["individual", "equipe", "setor"] } },
+          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "ID do usuario ou lider" },
+          { "name": "setor", "in": "query", "schema": { "type": "string" }, "description": "Nome do setor (para tipo=setor)" },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": { "description": "Arquivo Excel", "content": { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "Tipo invalido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Autenticacao", "description": "Login, registro e dados do usuario" },
+    { "name": "Usuarios", "description": "Gerenciamento de usuarios" },
+    { "name": "Avaliacoes", "description": "Micro-avaliacoes diarias de saude mental" },
+    { "name": "Perguntas", "description": "Gerenciamento de perguntas das avaliacoes" },
+    { "name": "Emergencias", "description": "Registro e gerenciamento de emergencias" },
+    { "name": "Alertas", "description": "Alertas automaticos e notificacoes" },
+    { "name": "Dashboard", "description": "Dashboards de lideranca com metricas e KPIs" },
+    { "name": "Relatorios", "description": "Relatorios individuais, de equipe e por setor" }
+  ]
+}
