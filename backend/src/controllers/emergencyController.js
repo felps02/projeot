@@ -20,11 +20,7 @@ async function createEmergency(req, res, next) {
       descricao: `Emergencia registrada: ${motivo}`
     });
 
-    await alertService.notifyLeader(
-      req.user.id,
-      'emergencia',
-      `Emergencia registrada por ${req.user.nome}: ${motivo}`
-    );
+    await alertService.notifyLeaderEmergency(req.user.id, motivo);
 
     return successResponse(res, emergency, 'Emergencia registrada com sucesso', 201);
   } catch (error) {

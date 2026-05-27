@@ -7,6 +7,8 @@ const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const path = require('path');
 
+const logger = require('./utils/logger');
+const initDb = require('./config/initDb');
 const errorHandler = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth');
@@ -21,7 +23,13 @@ const reportRoutes = require('./routes/reports');
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+
+const corsOrigins = (process.env.CORS_ORIGINS || '*').split(',').map(s => s.trim());
+app.use(cors({
+  origin: corsOrigins.includes('*') ? true : corsOrigins,
+  credentials: true
+}));
+
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -53,9 +61,25 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Psicossocial API rodando na porta ${PORT}`);
-  console.log(`Documentacao disponivel em http://localhost:${PORT}/api/docs`);
-});
+async function start() {
+  try {
+    await initDb();
+  } catch (err) {
+    logger.error('Falha ao inicializar o banco de dados', {
+      code: err.code,
+      message: err.message
+    });
+    process.exit(1);
+  }
+
+  app.listen(PORT, () => {
+    logger.info(`Psicossocial API rodando na porta ${PORT}`);
+    logger.info(`Documentacao disponivel em http://localhost:${PORT}/api/docs`);
+  });
+}
+
+if (require.main === module) {
+  start();
+}
 
 module.exports = app;

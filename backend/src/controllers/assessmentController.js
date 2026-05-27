@@ -1,6 +1,7 @@
 const Assessment = require('../models/Assessment');
 const Answer = require('../models/Answer');
 const riskEngine = require('../services/riskEngine');
+const AuditLog = require('../models/AuditLog');
 const { successResponse, errorResponse, paginationParams, todayDateString } = require('../utils/helpers');
 
 async function createAssessment(req, res, next) {
@@ -53,13 +54,24 @@ async function listAssessments(req, res, next) {
     if (req.query.startDate) filters.startDate = req.query.startDate;
     if (req.query.endDate) filters.endDate = req.query.endDate;
 
+    if (req.user.perfil === 'lider') {
+      return errorResponse(res,
+        'Lideres nao acessam avaliacoes individuais. Use GET /api/v1/dashboard para dados agregados.',
+        403
+      );
+    }
+
     let assessments;
-    if (req.user.perfil === 'funcionario') {
-      assessments = await Assessment.findByUser(req.user.id, filters);
-    } else if (req.user.perfil === 'lider') {
-      assessments = await Assessment.getBySubordinates(req.user.id, filters);
+    if (req.user.perfil === 'administrador' && req.query.usuario_id) {
+      assessments = await Assessment.findByUser(parseInt(req.query.usuario_id, 10), filters);
+      AuditLog.log(req, {
+        acao: 'assessment.list_individual',
+        recurso: 'usuario',
+        recurso_id: parseInt(req.query.usuario_id, 10),
+        detalhes: 'admin listou avaliacoes individuais'
+      });
     } else {
-      assessments = await Assessment.findByUser(req.query.usuario_id || req.user.id, filters);
+      assessments = await Assessment.findByUser(req.user.id, filters);
     }
 
     return successResponse(res, {
@@ -78,11 +90,23 @@ async function getAssessment(req, res, next) {
       return errorResponse(res, 'Avaliacao nao encontrada', 404);
     }
 
-    if (req.user.perfil === 'funcionario' && assessment.usuario_id !== req.user.id) {
-      return errorResponse(res, 'Acesso negado', 403);
+    const isSelf = assessment.usuario_id === req.user.id;
+    const isAdmin = req.user.perfil === 'administrador';
+
+    if (!isSelf && !isAdmin) {
+      return errorResponse(res, 'Acesso negado. Dados individuais sao restritos.', 403);
     }
 
     const answers = await Answer.findByAssessment(assessment.id);
+
+    if (isAdmin && !isSelf) {
+      AuditLog.log(req, {
+        acao: 'assessment.view_individual',
+        recurso: 'avaliacao',
+        recurso_id: assessment.id,
+        detalhes: `admin acessou avaliacao individual do usuario ${assessment.usuario_id}`
+      });
+    }
 
     return successResponse(res, {
       avaliacao: assessment,
@@ -96,7 +120,26 @@ async function getAssessment(req, res, next) {
 async function getHistory(req, res, next) {
   try {
     const { page, limit, offset } = paginationParams(req.query);
-    const userId = req.user.perfil === 'funcionario' ? req.user.id : (req.query.usuario_id || req.user.id);
+
+    if (req.user.perfil === 'lider') {
+      return errorResponse(res,
+        'Lideres nao acessam historicos individuais. Use GET /api/v1/dashboard/tendencias.',
+        403
+      );
+    }
+
+    const userId = req.user.perfil === 'administrador' && req.query.usuario_id
+      ? parseInt(req.query.usuario_id, 10)
+      : req.user.id;
+
+    if (req.user.perfil === 'administrador' && userId !== req.user.id) {
+      AuditLog.log(req, {
+        acao: 'assessment.view_history',
+        recurso: 'usuario',
+        recurso_id: userId,
+        detalhes: 'admin acessou historico individual'
+      });
+    }
 
     const history = await Assessment.getHistory(userId, limit, offset);
     const total = await Assessment.countByUser(userId);
@@ -115,7 +158,7 @@ async function checkToday(req, res, next) {
     const today = todayDateString();
     const assessment = await Assessment.findByDate(req.user.id, today);
 
-    const done = assessment !== null && assessment.completada === 1;
+    const done = assessment !== null && (assessment.completada === 1 || assessment.completada === true);
 
     return successResponse(res, {
       realizada: done,

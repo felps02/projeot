@@ -1,5 +1,6 @@
 const Alert = require('../models/Alert');
 const { successResponse, errorResponse, paginationParams } = require('../utils/helpers');
+const { K_MIN, shouldSuppress, suppressedGroup } = require('../utils/privacy');
 
 async function listAlerts(req, res, next) {
   try {
@@ -9,22 +10,48 @@ async function listAlerts(req, res, next) {
     if (req.query.tipo) filters.tipo = req.query.tipo;
     if (req.query.lido !== undefined) filters.lido = req.query.lido === 'true';
 
-    let alerts;
-    if (req.user.perfil === 'funcionario') {
-      alerts = await Alert.findByUser(req.user.id, filters);
-    } else if (req.user.perfil === 'lider') {
-      const ownAlerts = await Alert.findByUser(req.user.id, filters);
-      const subAlerts = await Alert.findBySubordinates(req.user.id, filters);
-      alerts = [...ownAlerts, ...subAlerts].sort((a, b) => new Date(b.data) - new Date(a.data));
-      if (limit) alerts = alerts.slice(0, limit);
-    } else {
-      alerts = await Alert.findByUser(req.user.id, filters);
+    if (req.user.perfil === 'lider') {
+      return errorResponse(res,
+        'Lideres acessam apenas dados agregados. Use GET /api/v1/alertas/agregado.',
+        403
+      );
     }
+
+    const alerts = await Alert.findByUser(req.user.id, filters);
 
     return successResponse(res, {
       alertas: alerts,
       paginacao: { pagina: page, limite: limit }
     }, 'Lista de alertas');
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getAggregated(req, res, next) {
+  try {
+    const dimensao = req.query.dimensao === 'turno' ? 'turno' : 'setor';
+    const filters = {};
+    if (req.query.lido !== undefined) filters.lido = req.query.lido === 'true';
+    if (req.query.tipo) filters.tipo = req.query.tipo;
+    if (req.query.nivel) filters.nivel = req.query.nivel;
+
+    const rows = await Alert.aggregateByGroup(dimensao, filters);
+
+    return successResponse(res, {
+      dimensao,
+      k_minimo: K_MIN,
+      grupos: rows.map(r => shouldSuppress(r.pessoas_distintas)
+        ? { grupo: r.grupo, nivel: r.nivel, tipo: r.tipo, ...suppressedGroup() }
+        : {
+            grupo: r.grupo,
+            nivel: r.nivel,
+            tipo: r.tipo,
+            total_alertas: r.total,
+            pessoas: r.pessoas_distintas
+          }
+      )
+    }, 'Alertas agregados');
   } catch (error) {
     next(error);
   }
@@ -37,7 +64,7 @@ async function markAsRead(req, res, next) {
       return errorResponse(res, 'Alerta nao encontrado', 404);
     }
 
-    if (alert.usuario_id !== req.user.id && req.user.perfil === 'funcionario') {
+    if (alert.usuario_id !== req.user.id) {
       return errorResponse(res, 'Acesso negado', 403);
     }
 
@@ -50,19 +77,17 @@ async function markAsRead(req, res, next) {
 
 async function countUnread(req, res, next) {
   try {
-    let total;
     if (req.user.perfil === 'lider') {
-      const own = await Alert.countUnread(req.user.id);
-      const sub = await Alert.countUnreadBySubordinates(req.user.id);
-      total = own + sub;
-    } else {
-      total = await Alert.countUnread(req.user.id);
+      return errorResponse(res,
+        'Lideres acessam apenas dados agregados. Use GET /api/v1/alertas/agregado.',
+        403
+      );
     }
-
+    const total = await Alert.countUnread(req.user.id);
     return successResponse(res, { nao_lidos: total }, 'Contagem de alertas nao lidos');
   } catch (error) {
     next(error);
   }
 }
 
-module.exports = { listAlerts, markAsRead, countUnread };
+module.exports = { listAlerts, markAsRead, countUnread, getAggregated };

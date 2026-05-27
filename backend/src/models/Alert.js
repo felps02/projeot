@@ -3,7 +3,7 @@ const pool = require('../config/database');
 class Alert {
   static async findById(id) {
     const [rows] = await pool.execute(
-      `SELECT al.*, u.nome as usuario_nome, u.setor as usuario_setor
+      `SELECT al.*, u.setor as usuario_setor, u.turno as usuario_turno
        FROM alertas al
        JOIN usuarios u ON al.usuario_id = u.id
        WHERE al.id = ?`,
@@ -13,20 +13,11 @@ class Alert {
   }
 
   static async findByUser(userId, filters = {}) {
-    let query = `SELECT al.*, u.nome as usuario_nome
-                 FROM alertas al
-                 JOIN usuarios u ON al.usuario_id = u.id
-                 WHERE al.usuario_id = ?`;
+    let query = `SELECT al.* FROM alertas al WHERE al.usuario_id = ?`;
     const params = [userId];
 
-    if (filters.tipo) {
-      query += ' AND al.tipo = ?';
-      params.push(filters.tipo);
-    }
-    if (filters.lido !== undefined) {
-      query += ' AND al.lido = ?';
-      params.push(filters.lido);
-    }
+    if (filters.tipo) { query += ' AND al.tipo = ?'; params.push(filters.tipo); }
+    if (filters.lido !== undefined) { query += ' AND al.lido = ?'; params.push(filters.lido); }
 
     query += ' ORDER BY al.data DESC';
 
@@ -36,18 +27,6 @@ class Alert {
     }
 
     const [rows] = await pool.execute(query, params);
-    return rows;
-  }
-
-  static async findUnread(userId) {
-    const [rows] = await pool.execute(
-      `SELECT al.*, u.nome as usuario_nome
-       FROM alertas al
-       JOIN usuarios u ON al.usuario_id = u.id
-       WHERE al.usuario_id = ? AND al.lido = FALSE
-       ORDER BY al.data DESC`,
-      [userId]
-    );
     return rows;
   }
 
@@ -72,59 +51,40 @@ class Alert {
     return this.findById(id);
   }
 
-  static async findByLevel(nivel, filters = {}) {
-    let query = `SELECT al.*, u.nome as usuario_nome, u.setor as usuario_setor
+  static async aggregateByGroup(dimensao, filters = {}) {
+    const groupCol = dimensao === 'turno' ? 'u.turno' : 'u.setor';
+    const fallback = dimensao === 'turno' ? 'Sem Turno' : 'Sem Setor';
+
+    let query = `SELECT
+                   COALESCE(${groupCol}, ?) as grupo,
+                   al.nivel,
+                   al.tipo,
+                   COUNT(*) as total,
+                   COUNT(DISTINCT al.usuario_id) as pessoas_distintas
                  FROM alertas al
                  JOIN usuarios u ON al.usuario_id = u.id
-                 WHERE al.nivel = ?`;
-    const params = [nivel];
+                 WHERE 1=1`;
+    const params = [fallback];
 
-    if (filters.lider_id) {
-      query += ' AND u.lider_id = ?';
-      params.push(filters.lider_id);
-    }
+    if (filters.lido !== undefined) { query += ' AND al.lido = ?'; params.push(filters.lido); }
+    if (filters.tipo) { query += ' AND al.tipo = ?'; params.push(filters.tipo); }
+    if (filters.nivel) { query += ' AND al.nivel = ?'; params.push(filters.nivel); }
 
-    query += ' ORDER BY al.data DESC';
-
-    if (filters.limit) {
-      query += ' LIMIT ? OFFSET ?';
-      params.push(filters.limit, filters.offset || 0);
-    }
+    query += ` GROUP BY ${groupCol}, al.nivel, al.tipo ORDER BY grupo, al.nivel`;
 
     const [rows] = await pool.execute(query, params);
     return rows;
   }
 
-  static async findBySubordinates(liderId, filters = {}) {
-    let query = `SELECT al.*, u.nome as usuario_nome, u.setor as usuario_setor
+  static async countAllUnread(filters = {}) {
+    let query = `SELECT COUNT(*) as total
                  FROM alertas al
                  JOIN usuarios u ON al.usuario_id = u.id
-                 WHERE u.lider_id = ?`;
-    const params = [liderId];
-
-    if (filters.lido !== undefined) {
-      query += ' AND al.lido = ?';
-      params.push(filters.lido);
-    }
-
-    query += ' ORDER BY al.data DESC';
-
-    if (filters.limit) {
-      query += ' LIMIT ? OFFSET ?';
-      params.push(filters.limit, filters.offset || 0);
-    }
-
+                 WHERE al.lido = FALSE`;
+    const params = [];
+    if (filters.setor) { query += ' AND u.setor = ?'; params.push(filters.setor); }
+    if (filters.turno) { query += ' AND u.turno = ?'; params.push(filters.turno); }
     const [rows] = await pool.execute(query, params);
-    return rows;
-  }
-
-  static async countUnreadBySubordinates(liderId) {
-    const [rows] = await pool.execute(
-      `SELECT COUNT(*) as total FROM alertas al
-       JOIN usuarios u ON al.usuario_id = u.id
-       WHERE u.lider_id = ? AND al.lido = FALSE`,
-      [liderId]
-    );
     return rows[0].total;
   }
 }

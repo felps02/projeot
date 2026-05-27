@@ -2,13 +2,14 @@ const pool = require('../config/database');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const { daysAgoDateString, todayDateString } = require('../utils/helpers');
+const { K_MIN, shouldSuppress, SUPRIMIDO_MOTIVO } = require('../utils/privacy');
 
 async function generateIndividualReport(userId, dateRange = {}) {
   const startDate = dateRange.startDate || daysAgoDateString(30);
   const endDate = dateRange.endDate || todayDateString();
 
   const [userRows] = await pool.execute(
-    'SELECT id, nome, email, cargo, setor FROM usuarios WHERE id = ?',
+    'SELECT id, nome, email, cargo, setor, turno FROM usuarios WHERE id = ?',
     [userId]
   );
   if (userRows.length === 0) return null;
@@ -69,40 +70,44 @@ async function generateTeamReport(leaderId, dateRange = {}) {
   const startDate = dateRange.startDate || daysAgoDateString(30);
   const endDate = dateRange.endDate || todayDateString();
 
-  const [leader] = await pool.execute(
-    'SELECT id, nome, setor FROM usuarios WHERE id = ?',
+  const [leaderRows] = await pool.execute(
+    "SELECT id, nome, setor, turno FROM usuarios WHERE id = ? AND perfil = 'lider'",
+    [leaderId]
+  );
+  if (leaderRows.length === 0) return null;
+  const leader = leaderRows[0];
+
+  const [subordinates] = await pool.execute(
+    "SELECT id FROM usuarios WHERE lider_id = ? AND status = 'ativo'",
     [leaderId]
   );
 
-  const [subordinates] = await pool.execute(
-    'SELECT id, nome, cargo FROM usuarios WHERE lider_id = ? AND status = ?',
-    [leaderId, 'ativo']
-  );
-
   const memberIds = subordinates.map(s => s.id);
-  if (memberIds.length === 0) {
+  const totalMembros = memberIds.length;
+
+  if (shouldSuppress(totalMembros)) {
     return {
-      lider: leader[0],
-      periodo: { inicio: startDate, fim: endDate },
-      resumo: { total_membros: 0, participacao: 0, media_score: 0 },
-      membros: [],
-      distribuicao_risco: { baixo: 0, moderado: 0, alto: 0, critico: 0 }
+      lider: { id: leader.id, setor: leader.setor, turno: leader.turno },
+      periodo: { inicio: startDate, fim: endDate, k_minimo: K_MIN },
+      suprimido: true,
+      motivo: SUPRIMIDO_MOTIVO,
+      resumo: null,
+      distribuicao_risco: null,
+      categorias: []
     };
   }
 
   const placeholders = memberIds.map(() => '?').join(',');
 
-  const [assessmentStats] = await pool.execute(
+  const [aggregateStats] = await pool.execute(
     `SELECT
-       a.usuario_id,
-       COUNT(*) as total,
+       COUNT(DISTINCT a.usuario_id) as participantes,
        AVG(a.score_risco) as media_score,
-       MAX(a.score_risco) as max_score
+       COUNT(*) as total_avaliacoes
      FROM avaliacoes a
      WHERE a.usuario_id IN (${placeholders})
        AND a.data BETWEEN ? AND ?
-       AND a.completada = TRUE
-     GROUP BY a.usuario_id`,
+       AND a.completada = TRUE`,
     [...memberIds, startDate, endDate]
   );
 
@@ -116,43 +121,40 @@ async function generateTeamReport(leaderId, dateRange = {}) {
     [...memberIds, startDate, endDate]
   );
 
-  const statsMap = {};
-  for (const stat of assessmentStats) {
-    statsMap[stat.usuario_id] = stat;
-  }
-
-  const membros = subordinates.map(sub => {
-    const stats = statsMap[sub.id];
-    return {
-      id: sub.id,
-      nome: sub.nome,
-      cargo: sub.cargo,
-      total_avaliacoes: stats ? stats.total : 0,
-      media_score: stats ? Math.round(parseFloat(stats.media_score) * 100) / 100 : null,
-      max_score: stats ? parseFloat(stats.max_score) : null
-    };
-  });
-
-  const participantCount = assessmentStats.length;
-  const overallAvg = assessmentStats.length > 0
-    ? assessmentStats.reduce((s, a) => s + parseFloat(a.media_score), 0) / assessmentStats.length
-    : 0;
+  const [categoryAvgs] = await pool.execute(
+    `SELECT p.categoria, AVG(r.valor) as media
+     FROM respostas r
+     JOIN perguntas p ON r.pergunta_id = p.id
+     JOIN avaliacoes a ON r.avaliacao_id = a.id
+     WHERE a.usuario_id IN (${placeholders})
+       AND a.data BETWEEN ? AND ?
+       AND a.completada = TRUE
+     GROUP BY p.categoria
+     ORDER BY media DESC`,
+    [...memberIds, startDate, endDate]
+  );
 
   const distribuicao = { baixo: 0, moderado: 0, alto: 0, critico: 0 };
-  for (const rd of riskDist) {
-    distribuicao[rd.nivel_risco] = rd.total;
-  }
+  for (const rd of riskDist) distribuicao[rd.nivel_risco] = rd.total;
 
   return {
-    lider: leader[0],
-    periodo: { inicio: startDate, fim: endDate },
+    lider: { id: leader.id, setor: leader.setor, turno: leader.turno },
+    periodo: { inicio: startDate, fim: endDate, k_minimo: K_MIN },
     resumo: {
-      total_membros: subordinates.length,
-      participacao: Math.round((participantCount / subordinates.length) * 100),
-      media_score: Math.round(overallAvg * 100) / 100
+      total_membros: totalMembros,
+      participacao: aggregateStats[0].participantes
+        ? Math.round((aggregateStats[0].participantes / totalMembros) * 100)
+        : 0,
+      media_score: aggregateStats[0].media_score
+        ? Math.round(parseFloat(aggregateStats[0].media_score) * 100) / 100
+        : 0,
+      total_avaliacoes: aggregateStats[0].total_avaliacoes
     },
-    membros,
-    distribuicao_risco: distribuicao
+    distribuicao_risco: distribuicao,
+    categorias: categoryAvgs.map(c => ({
+      categoria: c.categoria,
+      media: Math.round(parseFloat(c.media) * 100) / 100
+    }))
   };
 }
 
@@ -161,17 +163,21 @@ async function generateSectorReport(setor, dateRange = {}) {
   const endDate = dateRange.endDate || todayDateString();
 
   const [employees] = await pool.execute(
-    'SELECT id, nome FROM usuarios WHERE setor = ? AND status = ?',
-    [setor, 'ativo']
+    "SELECT id FROM usuarios WHERE setor = ? AND status = 'ativo'",
+    [setor]
   );
 
   const empIds = employees.map(e => e.id);
-  if (empIds.length === 0) {
+  const totalFuncionarios = empIds.length;
+
+  if (shouldSuppress(totalFuncionarios)) {
     return {
       setor,
-      periodo: { inicio: startDate, fim: endDate },
-      resumo: { total_funcionarios: 0, participacao: 0, media_score: 0 },
-      distribuicao_risco: { baixo: 0, moderado: 0, alto: 0, critico: 0 },
+      periodo: { inicio: startDate, fim: endDate, k_minimo: K_MIN },
+      suprimido: true,
+      motivo: SUPRIMIDO_MOTIVO,
+      resumo: null,
+      distribuicao_risco: null,
       categorias: []
     };
   }
@@ -214,17 +220,19 @@ async function generateSectorReport(setor, dateRange = {}) {
   );
 
   const distribuicao = { baixo: 0, moderado: 0, alto: 0, critico: 0 };
-  for (const rd of riskDist) {
-    distribuicao[rd.nivel_risco] = rd.total;
-  }
+  for (const rd of riskDist) distribuicao[rd.nivel_risco] = rd.total;
 
   return {
     setor,
-    periodo: { inicio: startDate, fim: endDate },
+    periodo: { inicio: startDate, fim: endDate, k_minimo: K_MIN },
     resumo: {
-      total_funcionarios: employees.length,
-      participacao: stats[0].participantes ? Math.round((stats[0].participantes / employees.length) * 100) : 0,
-      media_score: stats[0].media_score ? Math.round(parseFloat(stats[0].media_score) * 100) / 100 : 0,
+      total_funcionarios: totalFuncionarios,
+      participacao: stats[0].participantes
+        ? Math.round((stats[0].participantes / totalFuncionarios) * 100)
+        : 0,
+      media_score: stats[0].media_score
+        ? Math.round(parseFloat(stats[0].media_score) * 100) / 100
+        : 0,
       total_avaliacoes: stats[0].total_avaliacoes
     },
     distribuicao_risco: distribuicao,
@@ -235,7 +243,7 @@ async function generateSectorReport(setor, dateRange = {}) {
   };
 }
 
-async function generatePDF(reportData, type = 'individual') {
+async function generatePDF(reportData, type = 'setor') {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ margin: 50 });
@@ -247,20 +255,27 @@ async function generatePDF(reportData, type = 'individual') {
 
       doc.fontSize(20).text('Relatorio Psicossocial', { align: 'center' });
       doc.moveDown();
-      doc.fontSize(12).text(`Tipo: ${type === 'individual' ? 'Individual' : type === 'equipe' ? 'Equipe' : 'Setor'}`, { align: 'center' });
+      const titulo = type === 'individual' ? 'Individual'
+        : type === 'equipe' ? 'Equipe (Agregado)'
+        : 'Setor (Agregado)';
+      doc.fontSize(12).text(`Tipo: ${titulo}`, { align: 'center' });
       doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
       doc.moveDown(2);
-
       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
       doc.moveDown();
 
-      if (type === 'individual' && reportData.usuario) {
+      if (reportData.suprimido) {
+        doc.fontSize(14).text('Relatorio suprimido por LGPD');
+        doc.moveDown(0.5);
+        doc.fontSize(10).text(reportData.motivo || SUPRIMIDO_MOTIVO);
+      } else if (type === 'individual' && reportData.usuario) {
         doc.fontSize(14).text('Dados do Funcionario');
         doc.moveDown(0.5);
         doc.fontSize(10);
         doc.text(`Nome: ${reportData.usuario.nome}`);
         doc.text(`Cargo: ${reportData.usuario.cargo || 'N/A'}`);
         doc.text(`Setor: ${reportData.usuario.setor || 'N/A'}`);
+        doc.text(`Turno: ${reportData.usuario.turno || 'N/A'}`);
         doc.text(`Periodo: ${reportData.periodo.inicio} a ${reportData.periodo.fim}`);
         doc.moveDown();
 
@@ -279,28 +294,15 @@ async function generatePDF(reportData, type = 'individual') {
           for (const cat of reportData.categorias) {
             doc.text(`  ${cat.categoria}: ${cat.media}/5`);
           }
-          doc.moveDown();
         }
-
-        if (reportData.alertas && reportData.alertas.length > 0) {
-          doc.fontSize(14).text('Alertas no Periodo');
-          doc.moveDown(0.5);
-          doc.fontSize(10);
-          for (const alert of reportData.alertas) {
-            doc.text(`  ${alert.tipo}: ${alert.total} ocorrencia(s)`);
-          }
-        }
-      } else if (type === 'equipe' && reportData.lider) {
-        doc.fontSize(14).text('Relatorio da Equipe');
+      } else if (type === 'equipe') {
+        doc.fontSize(14).text('Relatorio Agregado de Equipe');
         doc.moveDown(0.5);
         doc.fontSize(10);
-        doc.text(`Lider: ${reportData.lider.nome}`);
+        if (reportData.lider) {
+          doc.text(`Setor: ${reportData.lider.setor || 'N/A'} | Turno: ${reportData.lider.turno || 'N/A'}`);
+        }
         doc.text(`Periodo: ${reportData.periodo.inicio} a ${reportData.periodo.fim}`);
-        doc.moveDown();
-
-        doc.fontSize(14).text('Resumo');
-        doc.moveDown(0.5);
-        doc.fontSize(10);
         doc.text(`Total de membros: ${reportData.resumo.total_membros}`);
         doc.text(`Taxa de participacao: ${reportData.resumo.participacao}%`);
         doc.text(`Media do score: ${reportData.resumo.media_score}`);
@@ -313,24 +315,19 @@ async function generatePDF(reportData, type = 'individual') {
         doc.text(`  Baixo: ${dr.baixo} | Moderado: ${dr.moderado} | Alto: ${dr.alto} | Critico: ${dr.critico}`);
         doc.moveDown();
 
-        if (reportData.membros && reportData.membros.length > 0) {
-          doc.fontSize(14).text('Membros da Equipe');
+        if (reportData.categorias && reportData.categorias.length > 0) {
+          doc.fontSize(14).text('Media por Categoria');
           doc.moveDown(0.5);
           doc.fontSize(10);
-          for (const m of reportData.membros) {
-            doc.text(`  ${m.nome} - Avaliacoes: ${m.total_avaliacoes} - Media: ${m.media_score || 'N/A'}`);
+          for (const cat of reportData.categorias) {
+            doc.text(`  ${cat.categoria}: ${cat.media}/5`);
           }
         }
       } else if (type === 'setor') {
-        doc.fontSize(14).text(`Relatorio do Setor: ${reportData.setor}`);
+        doc.fontSize(14).text(`Relatorio Agregado do Setor: ${reportData.setor}`);
         doc.moveDown(0.5);
         doc.fontSize(10);
         doc.text(`Periodo: ${reportData.periodo.inicio} a ${reportData.periodo.fim}`);
-        doc.moveDown();
-
-        doc.fontSize(14).text('Resumo');
-        doc.moveDown(0.5);
-        doc.fontSize(10);
         doc.text(`Total de funcionarios: ${reportData.resumo.total_funcionarios}`);
         doc.text(`Taxa de participacao: ${reportData.resumo.participacao}%`);
         doc.text(`Media do score: ${reportData.resumo.media_score}`);
@@ -354,7 +351,7 @@ async function generatePDF(reportData, type = 'individual') {
       }
 
       doc.moveDown(2);
-      doc.fontSize(8).text('Este relatorio e confidencial e destinado apenas para uso interno.', { align: 'center' });
+      doc.fontSize(8).text(`Este relatorio e confidencial. Dados de equipe/setor sao agregados conforme LGPD (k>=${K_MIN}).`, { align: 'center' });
 
       doc.end();
     } catch (error) {
@@ -363,26 +360,30 @@ async function generatePDF(reportData, type = 'individual') {
   });
 }
 
-async function generateExcel(reportData, type = 'individual') {
+async function generateExcel(reportData, type = 'setor') {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Psicossocial API';
   workbook.created = new Date();
 
-  if (type === 'individual' && reportData.usuario) {
-    const sheet = workbook.addWorksheet('Relatorio Individual');
+  const main = workbook.addWorksheet('Relatorio');
+  main.columns = [
+    { header: 'Campo', key: 'campo', width: 25 },
+    { header: 'Valor', key: 'valor', width: 35 }
+  ];
 
-    sheet.columns = [
-      { header: 'Campo', key: 'campo', width: 25 },
-      { header: 'Valor', key: 'valor', width: 30 }
-    ];
-
-    sheet.addRow({ campo: 'Nome', valor: reportData.usuario.nome });
-    sheet.addRow({ campo: 'Cargo', valor: reportData.usuario.cargo || 'N/A' });
-    sheet.addRow({ campo: 'Setor', valor: reportData.usuario.setor || 'N/A' });
-    sheet.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
-    sheet.addRow({ campo: 'Total Avaliacoes', valor: reportData.resumo.total_avaliacoes });
-    sheet.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
-    sheet.addRow({ campo: 'Score Recente', valor: reportData.resumo.score_mais_recente || 'N/A' });
+  if (reportData.suprimido) {
+    main.addRow({ campo: 'Status', valor: 'SUPRIMIDO POR LGPD' });
+    main.addRow({ campo: 'Motivo', valor: reportData.motivo || SUPRIMIDO_MOTIVO });
+    main.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
+  } else if (type === 'individual' && reportData.usuario) {
+    main.addRow({ campo: 'Nome', valor: reportData.usuario.nome });
+    main.addRow({ campo: 'Cargo', valor: reportData.usuario.cargo || 'N/A' });
+    main.addRow({ campo: 'Setor', valor: reportData.usuario.setor || 'N/A' });
+    main.addRow({ campo: 'Turno', valor: reportData.usuario.turno || 'N/A' });
+    main.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
+    main.addRow({ campo: 'Total Avaliacoes', valor: reportData.resumo.total_avaliacoes });
+    main.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
+    main.addRow({ campo: 'Score Recente', valor: reportData.resumo.score_mais_recente || 'N/A' });
 
     if (reportData.evolucao && reportData.evolucao.length > 0) {
       const evoSheet = workbook.addWorksheet('Evolucao');
@@ -391,72 +392,40 @@ async function generateExcel(reportData, type = 'individual') {
         { header: 'Score', key: 'score', width: 12 },
         { header: 'Nivel', key: 'nivel', width: 12 }
       ];
-      for (const entry of reportData.evolucao) {
-        evoSheet.addRow(entry);
-      }
+      for (const entry of reportData.evolucao) evoSheet.addRow(entry);
     }
-
-    if (reportData.categorias && reportData.categorias.length > 0) {
-      const catSheet = workbook.addWorksheet('Categorias');
-      catSheet.columns = [
-        { header: 'Categoria', key: 'categoria', width: 20 },
-        { header: 'Media', key: 'media', width: 12 }
-      ];
-      for (const cat of reportData.categorias) {
-        catSheet.addRow(cat);
-      }
+  } else if (type === 'equipe') {
+    if (reportData.lider) {
+      main.addRow({ campo: 'Setor', valor: reportData.lider.setor || 'N/A' });
+      main.addRow({ campo: 'Turno', valor: reportData.lider.turno || 'N/A' });
     }
-  } else if (type === 'equipe' && reportData.lider) {
-    const sheet = workbook.addWorksheet('Relatorio Equipe');
-
-    sheet.columns = [
-      { header: 'Campo', key: 'campo', width: 25 },
-      { header: 'Valor', key: 'valor', width: 30 }
-    ];
-
-    sheet.addRow({ campo: 'Lider', valor: reportData.lider.nome });
-    sheet.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
-    sheet.addRow({ campo: 'Total Membros', valor: reportData.resumo.total_membros });
-    sheet.addRow({ campo: 'Participacao', valor: `${reportData.resumo.participacao}%` });
-    sheet.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
-
-    if (reportData.membros && reportData.membros.length > 0) {
-      const membrosSheet = workbook.addWorksheet('Membros');
-      membrosSheet.columns = [
-        { header: 'Nome', key: 'nome', width: 25 },
-        { header: 'Cargo', key: 'cargo', width: 20 },
-        { header: 'Avaliacoes', key: 'total_avaliacoes', width: 12 },
-        { header: 'Media Score', key: 'media_score', width: 15 },
-        { header: 'Max Score', key: 'max_score', width: 12 }
-      ];
-      for (const m of reportData.membros) {
-        membrosSheet.addRow(m);
-      }
-    }
+    main.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
+    main.addRow({ campo: 'Total Membros', valor: reportData.resumo.total_membros });
+    main.addRow({ campo: 'Participacao', valor: `${reportData.resumo.participacao}%` });
+    main.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
+    main.addRow({ campo: 'Distribuicao Baixo', valor: reportData.distribuicao_risco.baixo });
+    main.addRow({ campo: 'Distribuicao Moderado', valor: reportData.distribuicao_risco.moderado });
+    main.addRow({ campo: 'Distribuicao Alto', valor: reportData.distribuicao_risco.alto });
+    main.addRow({ campo: 'Distribuicao Critico', valor: reportData.distribuicao_risco.critico });
   } else if (type === 'setor') {
-    const sheet = workbook.addWorksheet('Relatorio Setor');
+    main.addRow({ campo: 'Setor', valor: reportData.setor });
+    main.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
+    main.addRow({ campo: 'Total Funcionarios', valor: reportData.resumo.total_funcionarios });
+    main.addRow({ campo: 'Participacao', valor: `${reportData.resumo.participacao}%` });
+    main.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
+    main.addRow({ campo: 'Distribuicao Baixo', valor: reportData.distribuicao_risco.baixo });
+    main.addRow({ campo: 'Distribuicao Moderado', valor: reportData.distribuicao_risco.moderado });
+    main.addRow({ campo: 'Distribuicao Alto', valor: reportData.distribuicao_risco.alto });
+    main.addRow({ campo: 'Distribuicao Critico', valor: reportData.distribuicao_risco.critico });
+  }
 
-    sheet.columns = [
-      { header: 'Campo', key: 'campo', width: 25 },
-      { header: 'Valor', key: 'valor', width: 30 }
+  if (reportData.categorias && reportData.categorias.length > 0) {
+    const catSheet = workbook.addWorksheet('Categorias');
+    catSheet.columns = [
+      { header: 'Categoria', key: 'categoria', width: 20 },
+      { header: 'Media', key: 'media', width: 12 }
     ];
-
-    sheet.addRow({ campo: 'Setor', valor: reportData.setor });
-    sheet.addRow({ campo: 'Periodo', valor: `${reportData.periodo.inicio} a ${reportData.periodo.fim}` });
-    sheet.addRow({ campo: 'Total Funcionarios', valor: reportData.resumo.total_funcionarios });
-    sheet.addRow({ campo: 'Participacao', valor: `${reportData.resumo.participacao}%` });
-    sheet.addRow({ campo: 'Media Score', valor: reportData.resumo.media_score });
-
-    if (reportData.categorias && reportData.categorias.length > 0) {
-      const catSheet = workbook.addWorksheet('Categorias');
-      catSheet.columns = [
-        { header: 'Categoria', key: 'categoria', width: 20 },
-        { header: 'Media', key: 'media', width: 12 }
-      ];
-      for (const cat of reportData.categorias) {
-        catSheet.addRow(cat);
-      }
-    }
+    for (const cat of reportData.categorias) catSheet.addRow(cat);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();

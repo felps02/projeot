@@ -16,7 +16,7 @@ async function checkMissedCheckins() {
   if (dayOfWeek === 0 || dayOfWeek === 6) return [];
 
   const [usersWithoutCheckin] = await pool.execute(
-    `SELECT u.id, u.nome, u.lider_id
+    `SELECT u.id
      FROM usuarios u
      WHERE u.status = 'ativo'
        AND u.perfil = 'funcionario'
@@ -39,7 +39,7 @@ async function checkMissedCheckins() {
         usuario_id: user.id,
         tipo: 'sem_checkin',
         nivel: 'baixo',
-        descricao: `${user.nome} nao realizou check-in em ${dateStr}`
+        descricao: `Sem check-in em ${dateStr}`
       });
       alerts.push(alert);
     }
@@ -48,32 +48,44 @@ async function checkMissedCheckins() {
   return alerts;
 }
 
-async function notifyLeader(userId, alertType, description) {
+// Notifica o lider via alerta agregado (sem identificar o funcionario).
+// Para emergencias use notifyLeaderEmergency (usuario opta por se expor).
+async function notifyLeader(userId, alertType, _description) {
   const [rows] = await pool.execute(
-    'SELECT lider_id FROM usuarios WHERE id = ?',
+    'SELECT lider_id, setor, turno FROM usuarios WHERE id = ?',
     [userId]
   );
-
   if (!rows[0] || !rows[0].lider_id) return null;
 
-  const leaderId = rows[0].lider_id;
-
-  const [userRows] = await pool.execute(
-    'SELECT nome FROM usuarios WHERE id = ?',
-    [userId]
-  );
-  const userName = userRows[0] ? userRows[0].nome : 'Funcionario';
+  const { lider_id, setor, turno } = rows[0];
+  const escopo = [setor && `setor ${setor}`, turno && `turno ${turno}`].filter(Boolean).join(', ') || 'sua equipe';
 
   return createAlert({
-    usuario_id: leaderId,
+    usuario_id: lider_id,
     tipo: alertType,
     nivel: alertType === 'risco_alto' ? 'alto' : 'moderado',
-    descricao: `[Subordinado: ${userName}] ${description}`
+    descricao: `[Anonimizado] Novo sinal em ${escopo}. Consulte o dashboard agregado.`
+  });
+}
+
+async function notifyLeaderEmergency(userId, motivo) {
+  const [rows] = await pool.execute(
+    'SELECT u.lider_id, u.nome FROM usuarios u WHERE u.id = ?',
+    [userId]
+  );
+  if (!rows[0] || !rows[0].lider_id) return null;
+
+  return createAlert({
+    usuario_id: rows[0].lider_id,
+    tipo: 'emergencia',
+    nivel: 'critico',
+    descricao: `Emergencia registrada por ${rows[0].nome}: ${motivo}`
   });
 }
 
 module.exports = {
   createAlert,
   checkMissedCheckins,
-  notifyLeader
+  notifyLeader,
+  notifyLeaderEmergency
 };

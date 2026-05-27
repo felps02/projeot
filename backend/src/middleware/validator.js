@@ -1,4 +1,4 @@
-const { body, param, query, validationResult } = require('express-validator');
+const { body, param, validationResult } = require('express-validator');
 const { errorResponse } = require('../utils/helpers');
 
 function handleValidation(req, res, next) {
@@ -20,7 +20,7 @@ const loginValidation = [
   handleValidation
 ];
 
-const registerValidation = [
+const createUserValidation = [
   body('nome')
     .notEmpty().withMessage('Nome e obrigatorio')
     .isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres')
@@ -42,8 +42,11 @@ const registerValidation = [
     .optional()
     .isLength({ max: 100 }).withMessage('Setor deve ter no maximo 100 caracteres')
     .trim(),
+  body('turno')
+    .optional({ nullable: true })
+    .isIn(['manha', 'tarde', 'noite', 'integral']).withMessage('Turno invalido'),
   body('lider_id')
-    .optional()
+    .optional({ nullable: true })
     .isInt({ min: 1 }).withMessage('ID do lider invalido'),
   handleValidation
 ];
@@ -101,19 +104,25 @@ const updateUserValidation = [
     .optional()
     .isEmail().withMessage('Email invalido')
     .normalizeEmail(),
-  body('cargo')
+  body('senha')
     .optional()
+    .isLength({ min: 6 }).withMessage('Senha deve ter no minimo 6 caracteres'),
+  body('cargo')
+    .optional({ nullable: true })
     .isLength({ max: 100 }).withMessage('Cargo deve ter no maximo 100 caracteres')
     .trim(),
   body('perfil')
     .optional()
     .isIn(['administrador', 'lider', 'funcionario']).withMessage('Perfil invalido'),
   body('setor')
-    .optional()
+    .optional({ nullable: true })
     .isLength({ max: 100 }).withMessage('Setor deve ter no maximo 100 caracteres')
     .trim(),
+  body('turno')
+    .optional({ nullable: true })
+    .isIn(['manha', 'tarde', 'noite', 'integral']).withMessage('Turno invalido'),
   body('lider_id')
-    .optional()
+    .optional({ nullable: true })
     .isInt({ min: 1 }).withMessage('ID do lider invalido'),
   body('status')
     .optional()
@@ -138,7 +147,7 @@ const emergencyStatusValidation = [
 
 module.exports = {
   loginValidation,
-  registerValidation,
+  createUserValidation,
   assessmentValidation,
   questionValidation,
   emergencyValidation,

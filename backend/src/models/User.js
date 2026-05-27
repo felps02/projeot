@@ -1,10 +1,12 @@
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
 
+const PUBLIC_COLUMNS = 'id, nome, email, cargo, perfil, setor, turno, lider_id, status, created_at, updated_at';
+
 class User {
   static async findById(id) {
     const [rows] = await pool.execute(
-      'SELECT id, nome, email, cargo, perfil, setor, lider_id, status, created_at, updated_at FROM usuarios WHERE id = ?',
+      `SELECT ${PUBLIC_COLUMNS} FROM usuarios WHERE id = ?`,
       [id]
     );
     return rows[0] || null;
@@ -19,25 +21,14 @@ class User {
   }
 
   static async findAll(filters = {}) {
-    let query = 'SELECT id, nome, email, cargo, perfil, setor, lider_id, status, created_at, updated_at FROM usuarios WHERE 1=1';
+    let query = `SELECT ${PUBLIC_COLUMNS} FROM usuarios WHERE 1=1`;
     const params = [];
 
-    if (filters.status) {
-      query += ' AND status = ?';
-      params.push(filters.status);
-    }
-    if (filters.perfil) {
-      query += ' AND perfil = ?';
-      params.push(filters.perfil);
-    }
-    if (filters.setor) {
-      query += ' AND setor = ?';
-      params.push(filters.setor);
-    }
-    if (filters.lider_id) {
-      query += ' AND lider_id = ?';
-      params.push(filters.lider_id);
-    }
+    if (filters.status) { query += ' AND status = ?'; params.push(filters.status); }
+    if (filters.perfil) { query += ' AND perfil = ?'; params.push(filters.perfil); }
+    if (filters.setor) { query += ' AND setor = ?'; params.push(filters.setor); }
+    if (filters.turno) { query += ' AND turno = ?'; params.push(filters.turno); }
+    if (filters.lider_id) { query += ' AND lider_id = ?'; params.push(filters.lider_id); }
 
     query += ' ORDER BY nome ASC';
 
@@ -55,8 +46,18 @@ class User {
     const hashedPassword = await bcrypt.hash(data.senha, salt);
 
     const [result] = await pool.execute(
-      'INSERT INTO usuarios (nome, email, senha, cargo, perfil, setor, lider_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [data.nome, data.email, hashedPassword, data.cargo || null, data.perfil || 'funcionario', data.setor || null, data.lider_id || null]
+      `INSERT INTO usuarios (nome, email, senha, cargo, perfil, setor, turno, lider_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data.nome,
+        data.email,
+        hashedPassword,
+        data.cargo || null,
+        data.perfil || 'funcionario',
+        data.setor || null,
+        data.turno || null,
+        data.lider_id || null
+      ]
     );
 
     return this.findById(result.insertId);
@@ -71,6 +72,7 @@ class User {
     if (data.cargo !== undefined) { fields.push('cargo = ?'); params.push(data.cargo); }
     if (data.perfil !== undefined) { fields.push('perfil = ?'); params.push(data.perfil); }
     if (data.setor !== undefined) { fields.push('setor = ?'); params.push(data.setor); }
+    if (data.turno !== undefined) { fields.push('turno = ?'); params.push(data.turno); }
     if (data.lider_id !== undefined) { fields.push('lider_id = ?'); params.push(data.lider_id); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.senha !== undefined) {
@@ -94,7 +96,7 @@ class User {
 
   static async findByLider(liderId) {
     const [rows] = await pool.execute(
-      'SELECT id, nome, email, cargo, perfil, setor, lider_id, status, created_at, updated_at FROM usuarios WHERE lider_id = ? AND status = ?',
+      `SELECT ${PUBLIC_COLUMNS} FROM usuarios WHERE lider_id = ? AND status = ?`,
       [liderId, 'ativo']
     );
     return rows;
@@ -102,10 +104,26 @@ class User {
 
   static async findSubordinates(liderId) {
     const [rows] = await pool.execute(
-      'SELECT id, nome, email, cargo, perfil, setor, lider_id, status, created_at, updated_at FROM usuarios WHERE lider_id = ? ORDER BY nome ASC',
+      `SELECT ${PUBLIC_COLUMNS} FROM usuarios WHERE lider_id = ? ORDER BY nome ASC`,
       [liderId]
     );
     return rows;
+  }
+
+  static async isValidLeader(id) {
+    const [rows] = await pool.execute(
+      "SELECT id FROM usuarios WHERE id = ? AND perfil = 'lider' AND status = 'ativo'",
+      [id]
+    );
+    return rows.length > 0;
+  }
+
+  static async countByPerfil(perfil) {
+    const [rows] = await pool.execute(
+      'SELECT COUNT(*) as total FROM usuarios WHERE perfil = ? AND status = ?',
+      [perfil, 'ativo']
+    );
+    return rows[0].total;
   }
 
   static async comparePassword(plainPassword, hashedPassword) {
@@ -119,6 +137,7 @@ class User {
     if (filters.status) { query += ' AND status = ?'; params.push(filters.status); }
     if (filters.perfil) { query += ' AND perfil = ?'; params.push(filters.perfil); }
     if (filters.setor) { query += ' AND setor = ?'; params.push(filters.setor); }
+    if (filters.turno) { query += ' AND turno = ?'; params.push(filters.turno); }
     if (filters.lider_id) { query += ' AND lider_id = ?'; params.push(filters.lider_id); }
 
     const [rows] = await pool.execute(query, params);

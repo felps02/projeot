@@ -1,4 +1,5 @@
 const reportService = require('../services/reportService');
+const AuditLog = require('../models/AuditLog');
 const { successResponse, errorResponse } = require('../utils/helpers');
 
 async function getIndividualReport(req, res, next) {
@@ -13,6 +14,13 @@ async function getIndividualReport(req, res, next) {
     if (!report) {
       return errorResponse(res, 'Usuario nao encontrado', 404);
     }
+
+    AuditLog.log(req, {
+      acao: 'report.individual.view',
+      recurso: 'usuario',
+      recurso_id: userId,
+      detalhes: `admin acessou relatorio individual (${dateRange.startDate || 'auto'} a ${dateRange.endDate || 'auto'})`
+    });
 
     return successResponse(res, report, 'Relatorio individual');
   } catch (error) {
@@ -34,7 +42,10 @@ async function getTeamReport(req, res, next) {
     };
 
     const report = await reportService.generateTeamReport(leaderId, dateRange);
-    return successResponse(res, report, 'Relatorio da equipe');
+    if (!report) {
+      return errorResponse(res, 'Lider nao encontrado', 404);
+    }
+    return successResponse(res, report, 'Relatorio agregado da equipe');
   } catch (error) {
     next(error);
   }
@@ -49,7 +60,7 @@ async function getSectorReport(req, res, next) {
     };
 
     const report = await reportService.generateSectorReport(setor, dateRange);
-    return successResponse(res, report, 'Relatorio do setor');
+    return successResponse(res, report, 'Relatorio agregado do setor');
   } catch (error) {
     next(error);
   }
@@ -63,10 +74,22 @@ async function exportPdf(req, res, next) {
     let reportType;
 
     if (tipo === 'individual') {
+      if (req.user.perfil !== 'administrador') {
+        return errorResponse(res, 'Apenas administradores podem exportar relatorios individuais.', 403);
+      }
       reportData = await reportService.generateIndividualReport(parseInt(id, 10), dateRange);
       reportType = 'individual';
+      AuditLog.log(req, {
+        acao: 'report.individual.export_pdf',
+        recurso: 'usuario',
+        recurso_id: parseInt(id, 10)
+      });
     } else if (tipo === 'equipe') {
-      reportData = await reportService.generateTeamReport(parseInt(id, 10), dateRange);
+      const leaderId = parseInt(id, 10);
+      if (req.user.perfil === 'lider' && req.user.id !== leaderId) {
+        return errorResponse(res, 'Acesso negado', 403);
+      }
+      reportData = await reportService.generateTeamReport(leaderId, dateRange);
       reportType = 'equipe';
     } else if (tipo === 'setor') {
       reportData = await reportService.generateSectorReport(setor, dateRange);
@@ -98,10 +121,22 @@ async function exportExcel(req, res, next) {
     let reportType;
 
     if (tipo === 'individual') {
+      if (req.user.perfil !== 'administrador') {
+        return errorResponse(res, 'Apenas administradores podem exportar relatorios individuais.', 403);
+      }
       reportData = await reportService.generateIndividualReport(parseInt(id, 10), dateRange);
       reportType = 'individual';
+      AuditLog.log(req, {
+        acao: 'report.individual.export_excel',
+        recurso: 'usuario',
+        recurso_id: parseInt(id, 10)
+      });
     } else if (tipo === 'equipe') {
-      reportData = await reportService.generateTeamReport(parseInt(id, 10), dateRange);
+      const leaderId = parseInt(id, 10);
+      if (req.user.perfil === 'lider' && req.user.id !== leaderId) {
+        return errorResponse(res, 'Acesso negado', 403);
+      }
+      reportData = await reportService.generateTeamReport(leaderId, dateRange);
       reportType = 'equipe';
     } else if (tipo === 'setor') {
       reportData = await reportService.generateSectorReport(setor, dateRange);

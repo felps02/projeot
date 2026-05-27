@@ -2,7 +2,36 @@
   "permissions": {
     "allow": [
       "PowerShell(node --version)",
-      "PowerShell(npm --version)"
+      "PowerShell(npm --version)",
+      "Bash(flutter pub *)",
+      "Bash(curl -s \"https://pub.dev/api/packages/floor_generator\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/pinchbv/floor/master/floor_generator/pubspec.yaml\")",
+      "Bash(curl -s \"https://pub.dev/api/packages/analyzer\")",
+      "Bash(flutter analyze *)",
+      "Bash(find \"C:\\\\Users\\\\infra.ti\\\\AppData\\\\Local\\\\Pub\\\\Cache\\\\hosted\\\\pub.dev\" -name \"floor_annotation-*\" -type d 2>&1 | head -3)",
+      "Bash(flutter doctor *)",
+      "Bash(flutter test *)",
+      "Bash(flutter devices *)",
+      "Bash(dart run *)",
+      "Bash(flutter run *)",
+      "Bash(flutter build *)",
+      "PowerShell(Get-Process dart -ErrorAction SilentlyContinue)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/)",
+      "Bash(python serve.py)",
+      "Bash(curl -s -I http://localhost:8080/)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /F /PID 11932)",
+      "Bash(node -c src/app.js)",
+      "Bash(node -c src/config/initDb.js)",
+      "Bash(node -c src/controllers/userController.js)",
+      "Bash(node -c src/controllers/dashboardController.js)",
+      "Bash(node -c src/controllers/alertController.js)",
+      "Bash(node -e \"require\\('./src/app.js'\\); console.log\\('require ok'\\)\")",
+      "Bash(node -e \"process.chdir\\('backend'\\); require\\('./src/app.js'\\); console.log\\('require ok'\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(kill %1)",
+      "Bash(jobs -p)",
+      "Bash(node test_integration.js)"
     ]
   }
 }

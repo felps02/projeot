@@ -1,5 +1,6 @@
--- Psicossocial DB Schema
+-- Psicossocial DB Schema (DDL idempotente)
 -- Plataforma de avaliacao psicossocial para trabalhadores do comercio
+-- Este arquivo cria a estrutura. Seeds ficam em seeds.sql.
 
 CREATE DATABASE IF NOT EXISTS psicossocial_db
   CHARACTER SET utf8mb4
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   cargo VARCHAR(100),
   perfil ENUM('administrador', 'lider', 'funcionario') DEFAULT 'funcionario',
   setor VARCHAR(100),
+  turno ENUM('manha', 'tarde', 'noite', 'integral') NULL,
   lider_id INT NULL,
   status ENUM('ativo', 'inativo') DEFAULT 'ativo',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 CREATE INDEX idx_usuarios_email ON usuarios(email);
 CREATE INDEX idx_usuarios_perfil ON usuarios(perfil);
 CREATE INDEX idx_usuarios_setor ON usuarios(setor);
+CREATE INDEX idx_usuarios_turno ON usuarios(turno);
 CREATE INDEX idx_usuarios_lider_id ON usuarios(lider_id);
 CREATE INDEX idx_usuarios_status ON usuarios(status);
 
@@ -129,7 +132,9 @@ CREATE INDEX idx_emergencias_data ON emergencias(data);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   usuario_id INT,
-  acao VARCHAR(255) NOT NULL,
+  acao VARCHAR(100) NOT NULL,
+  recurso VARCHAR(100) NULL,
+  recurso_id INT NULL,
   detalhes TEXT,
   ip VARCHAR(45),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -138,19 +143,5 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX idx_audit_logs_usuario_id ON audit_logs(usuario_id);
 CREATE INDEX idx_audit_logs_acao ON audit_logs(acao);
+CREATE INDEX idx_audit_logs_recurso ON audit_logs(recurso);
 CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
-
--- ============================================================
--- Perguntas padrao
--- ============================================================
-INSERT INTO perguntas (texto, categoria, tipo, ativa, ordem) VALUES
-('Como voce avalia seu nivel de estresse hoje no trabalho?', 'estresse', 'likert', TRUE, 1),
-('Voce sentiu exaustao emocional durante sua jornada de trabalho?', 'burnout', 'likert', TRUE, 2),
-('Em que medida voce se sentiu ansioso(a) durante o expediente?', 'ansiedade', 'likert', TRUE, 3),
-('Voce considera que a carga de trabalho atual e adequada para voce?', 'sobrecarga', 'likert', TRUE, 4),
-('Qual e seu nivel de motivacao para realizar suas atividades profissionais?', 'motivacao', 'likert', TRUE, 5),
-('Voce se sentiu desrespeitado(a) ou constrangido(a) no ambiente de trabalho?', 'assedio', 'likert', TRUE, 6),
-('Como voce avalia seu nivel de energia e disposicao ao final do dia?', 'exaustao', 'emoji', TRUE, 7),
-('Como voce classifica o clima organizacional do seu setor hoje?', 'ambiente', 'emoji', TRUE, 8),
-('Voce conseguiu fazer pausas adequadas durante seu turno?', 'sobrecarga', 'likert', TRUE, 9),
-('Voce sente que recebe apoio suficiente da sua lideranca?', 'ambiente', 'likert', TRUE, 10);
