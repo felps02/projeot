@@ -3,7 +3,7 @@ const userController = require('../controllers/userController');
 const authMiddleware = require('../middleware/auth');
 const authorize = require('../middleware/rbac');
 const {
-  createUserValidation,
+  registerValidation,
   updateUserValidation,
   idParamValidation
 } = require('../middleware/validator');
@@ -15,7 +15,7 @@ router.use(authMiddleware);
 router.post(
   '/',
   authorize(['administrador', 'lider']),
-  createUserValidation,
+  registerValidation,
   userController.createUser
 );
 

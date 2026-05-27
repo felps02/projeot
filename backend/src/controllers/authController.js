@@ -4,6 +4,23 @@ const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const { successResponse, errorResponse } = require('../utils/helpers');
 
+async function register(req, res, next) {
+  try {
+    const { nome, email, senha, cargo, perfil, setor, turno, lider_id } = req.body;
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return errorResponse(res, 'Email ja cadastrado', 409);
+    }
+    const newUser = await User.create({
+      nome, email, senha, cargo, perfil, setor, turno, lider_id
+    });
+    const { senha: _, ...userData } = newUser;
+    return successResponse(res, userData, 'Usuario registrado com sucesso');
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function login(req, res, next) {
   try {
     const { email, senha } = req.body;
@@ -71,4 +88,4 @@ async function me(req, res, next) {
   }
 }
 
-module.exports = { login, me };
+module.exports = { login, me, register };

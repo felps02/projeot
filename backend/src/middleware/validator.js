@@ -20,7 +20,7 @@ const loginValidation = [
   handleValidation
 ];
 
-const createUserValidation = [
+const registerValidation = [
   body('nome')
     .notEmpty().withMessage('Nome e obrigatorio')
     .isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres')
@@ -147,7 +147,7 @@ const emergencyStatusValidation = [
 
 module.exports = {
   loginValidation,
-  createUserValidation,
+  registerValidation,
   assessmentValidation,
   questionValidation,
   emergencyValidation,

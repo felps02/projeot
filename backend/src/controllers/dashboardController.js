@@ -21,6 +21,7 @@ function buildScopeFilter(req) {
 
 async function getResumo(req, res, next) {
   try {
+    console.log(req.user)
     const today = todayDateString();
     const scope = buildScopeFilter(req);
 

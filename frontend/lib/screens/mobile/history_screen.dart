@@ -88,7 +88,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           delegate: SliverChildBuilderDelegate(
                             (context, index) {
                               final assessment =
-                                  provider.assessments[index];
+                                  provider.assessments[0];
                               final color =
                                   Helpers.getRiskColor(assessment.nivelRisco);
 
